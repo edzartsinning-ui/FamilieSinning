@@ -332,6 +332,39 @@
         }
       });
       item.append(label, button);
+      if (data.canDeleteInvitees) {
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button ghost';
+        removeButton.textContent = 'Entfernen';
+        removeButton.setAttribute('aria-label', name + ' entfernen');
+        removeButton.addEventListener('click', async () => {
+          if (!window.confirm(name + ' aus dieser Veranstaltung entfernen? Der Einladungslink wird ungültig und eine vorhandene Antwort wird gelöscht.')) return;
+          const selection = eventSelection;
+          removeButton.disabled = true;
+          button.disabled = true;
+          try {
+            await eventRequest('/admin/invitees', id, 'DELETE', {name});
+            if (selection !== eventSelection) return;
+            $('generatedLink').replaceChildren();
+            adminStatus.style.color = '';
+            adminStatus.textContent = name + ' wurde entfernt.';
+            try {
+              await refreshPeople(id, selection);
+            } catch {
+              if (selection === eventSelection) {
+                showError(adminStatus, new Error(name + ' wurde entfernt. Die Liste konnte gerade nicht aktualisiert werden.'));
+              }
+            }
+          } catch (err) {
+            if (selection === eventSelection) showError(adminStatus, err);
+          } finally {
+            removeButton.disabled = false;
+            button.disabled = false;
+          }
+        });
+        item.append(document.createTextNode(' '), removeButton);
+      }
       return item;
     }));
     $('oldName').replaceChildren(new Option('Bitte auswählen', ''), ...data.invitees.map(name => new Option(name, name)));

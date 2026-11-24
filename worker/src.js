@@ -93,7 +93,7 @@ export default {async fetch(req, env) {
   const cors = allowed ? {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Vary': 'Origin'
   } : {};
   const reply = (data, code) => json(data, code, cors);
@@ -208,7 +208,7 @@ export default {async fetch(req, env) {
       if (!event && id !== legacyEventId) return fail('Veranstaltung nicht gefunden.', 404);
       const [rsvps, invitees] = await Promise.all([responses(db, id), invitedNames(db, id)]);
       const emptyEvent = {title:'',date:'',time:'',place:'',activity:'',deadline:'',restFrom:'',active:false};
-      return reply({event: publicEvent(event) || emptyEvent, rsvps: rsvps.results, invitees: invitees.results.map(x => x.name)});
+      return reply({event: publicEvent(event) || emptyEvent, rsvps: rsvps.results, invitees: invitees.results.map(x => x.name), canDeleteInvitees: true});
     }
 
     if (path === '/admin/event' && req.method === 'PUT') {
@@ -249,6 +249,23 @@ export default {async fetch(req, env) {
         ? db.prepare('INSERT INTO invitees(name) VALUES(?) ON CONFLICT(name) DO NOTHING').bind(name)
         : db.prepare('INSERT INTO future_invitees(event_id,name) VALUES(?,?) ON CONFLICT(event_id,name) DO NOTHING').bind(id, name)).run();
       return result.meta.changes ? reply({ok: true}) : fail('Der Name steht bereits auf dieser Einladungsliste.', 409);
+    }
+
+    if (path === '/admin/invitees' && req.method === 'DELETE') {
+      const input = await body(req);
+      if (!validName(input.name)) return fail('Name prüfen.', 400);
+      const name = input.name.trim();
+      const statements = id === legacyEventId
+        ? [
+            db.prepare('DELETE FROM rsvps WHERE name=?').bind(name),
+            db.prepare('DELETE FROM invitees WHERE name=?').bind(name)
+          ]
+        : [
+            db.prepare('DELETE FROM future_rsvps WHERE event_id=? AND name=?').bind(id, name),
+            db.prepare('DELETE FROM future_invitees WHERE event_id=? AND name=?').bind(id, name)
+          ];
+      const [, removed] = await db.batch(statements);
+      return removed.meta.changes ? reply({ok: true}) : fail('Name nicht gefunden.', 404);
     }
 
     if (path === '/admin/invitees' && req.method === 'PUT') {
