@@ -12,7 +12,7 @@ Die Dateien sind vorbereitet. Die Website ist **noch nicht veröffentlicht**. `c
 2. Ein Cloudflare-Konto im **Workers Free** Tarif anlegen. Keinen Paid-Tarif wählen. Eine D1-Datenbank `familiesinning` anlegen. Ihre Datenbank-ID in `worker/wrangler.toml` einsetzen.
 3. `worker/schema.sql` auf der D1-Datenbank ausführen und `worker/src.js` als Worker bereitstellen. Die drei Werte `ADMIN_PASSWORD` und `TOKEN_SECRET` als **Secrets** beim Worker hinterlegen. `TOKEN_SECRET` muss eine lange zufällige Zeichenfolge sein. Die Werte dürfen nie ins Repository oder in `config.js`.
 4. Die öffentliche Worker-Adresse in `config.js` als `FAMILIE_API_URL` eintragen. Die vorhandene `ALLOWED_ORIGIN`-Angabe passt zur geplanten GitHub-Pages-Adresse.
-5. Im Elternbereich anmelden, die Veranstaltung sowie die neun eingeladenen Namen eintragen und für jeden Namen einen persönlichen Link erzeugen. Die Namen aus der Einladung gehören nur in die geschützte Datenbank, nicht in das GitHub-Repository. Der Nachname der zweiten Anna muss vor dem Druck nochmals bestätigt werden.
+5. Im Elternbereich anmelden, die Veranstaltung sowie die neun eingeladenen Namen eintragen und für jeden Namen einen persönlichen Link erzeugen. Die Namen aus der Einladung gehören nur in die geschützte Datenbank, nicht in das GitHub-Repository.
 6. Erst nach erfolgreichem Test der Anmeldung die individuellen Links als QR-Codes in die jeweiligen Einladungskarten einsetzen und die Karten neu ausgeben.
 
 Die voraussichtliche GitHub-Pages-Adresse lautet `https://edzartsinning-ui.github.io/FamilieSinning/`; sie ist erst nach der Veröffentlichung gültig.
