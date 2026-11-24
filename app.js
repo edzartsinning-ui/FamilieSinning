@@ -7,6 +7,7 @@
   const eventSelect = $('eventSelect'), archiveSelect = $('archiveSelect');
   const eventArchive = $('eventArchive'), eventForm = $('eventForm');
   const eventContents = $('eventContents'), eventStatus = $('eventStatus');
+  const eventWebsiteField = $('eventWebsiteField');
   const eventFields = ['title', 'date', 'time', 'place', 'activity', 'deadline', 'restFrom'];
   const adminDetails = $('verwaltung').querySelector('details');
 
@@ -18,6 +19,7 @@
 
   const rsvpForm = $('rsvpForm');
   const guestLead = document.querySelector('.lead');
+  const guestWebsite = $('guestWebsite');
   const signupDeadline = $('signupDeadline');
   const defaultLead = guestLead.textContent;
   const defaultDeadline = signupDeadline.textContent;
@@ -62,7 +64,8 @@
     $('guestName').textContent = '';
     $('inviteeName').textContent = '';
     $('infos').hidden = true;
-    document.querySelector('.feature').hidden = true;
+    guestWebsite.hidden = true;
+    guestWebsite.removeAttribute('href');
     guestLead.textContent = defaultLead;
     signupDeadline.textContent = defaultDeadline;
     rsvpForm.hidden = true;
@@ -103,7 +106,10 @@
     $('defaultHeading').hidden = true;
     $('guestHeading').hidden = false;
     $('infos').hidden = false;
-    document.querySelector('.feature').hidden = false;
+    if (typeof event.websiteUrl === 'string' && /^https?:\/\//i.test(event.websiteUrl)) {
+      guestWebsite.href = event.websiteUrl;
+      guestWebsite.hidden = false;
+    }
     guestVerified = true;
     renderStatus(data);
   }
@@ -229,7 +235,8 @@
   }
 
   async function loadEventList(preferredId) {
-    const {events} = await request('/admin/events', 'GET', null, adminToken);
+    const {events, canEditWebsite} = await request('/admin/events', 'GET', null, adminToken);
+    eventWebsiteField.hidden = !canEditWebsite;
     const today = new Intl.DateTimeFormat('sv-SE', {
       year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Europe/Berlin'
     }).format(new Date());
@@ -253,6 +260,7 @@
   function fillEventForm(event = {}) {
     for (const key of eventFields) eventForm.elements[key].value = event[key] || '';
     eventForm.elements.active.checked = !!event.active;
+    eventForm.elements.websiteUrl.value = event.websiteUrl || '';
   }
 
   async function selectEvent(id) {
@@ -442,6 +450,7 @@
     const id = eventId, selection = eventSelection;
     const event = Object.fromEntries(eventFields.map(key => [key, eventForm.elements[key].value.trim()]));
     event.active = eventForm.elements.active.checked;
+    if (!eventWebsiteField.hidden) event.websiteUrl = eventForm.elements.websiteUrl.value.trim();
     $('eventSave').disabled = true;
     eventSelect.inert = true;
     archiveSelect.inert = true;

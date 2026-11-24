@@ -38,12 +38,32 @@ function eventError(input) {
   if (![input.date, input.deadline, input.restFrom].every(validDate)
       || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.time)
       || input.deadline >= input.restFrom) return 'Datumsangaben prüfen.';
+  if (input.websiteUrl !== undefined && !validWebsite(input.websiteUrl)) {
+    return 'Bitte einen vollständigen Website-Link mit https:// oder http:// eingeben.';
+  }
   return null;
+}
+
+function validWebsite(value) {
+  if (typeof value !== 'string' || value.length > 2048) return false;
+  if (value === '') return true;
+  if (!/^https?:\/\//i.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return Boolean(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }
 
 function eventValues(input) {
   return [input.title.trim(), input.date, input.time, input.place.trim(), input.activity.trim(),
     input.deadline, input.restFrom, input.active === true ? 1 : 0];
+}
+
+async function eventWebsite(db, id) {
+  const entry = await db.prepare('SELECT url FROM event_websites WHERE event_id=?').bind(id).first();
+  return entry?.url || '';
 }
 
 function findEvent(db, id) {
@@ -149,7 +169,8 @@ export default {async fetch(req, env) {
       if (path === '/guest/event') {
         if (state === 'rest') return fail('Diese Veranstaltung ist derzeit nicht verfügbar.', 403);
         const {title, date, time, place, activity, deadline} = event;
-        return reply({event: {title, date, time, place, activity, deadline}, name: guest.name, status: state});
+        const websiteUrl = await eventWebsite(db, event.id);
+        return reply({event: {title, date, time, place, activity, deadline, websiteUrl}, name: guest.name, status: state});
       }
 
       if (state !== 'open') return fail('Die Anmeldung ist geschlossen.', 403);
@@ -184,7 +205,7 @@ export default {async fetch(req, env) {
     if (!await verify(req, env, 'admin')) return fail('Nicht angemeldet.', 401);
 
     if (path === '/admin/events' && req.method === 'GET') {
-      return reply({events: (await eventList(db)).results.map(publicEvent)});
+      return reply({events: (await eventList(db)).results.map(publicEvent), canEditWebsite: true});
     }
 
     if (path === '/admin/events' && req.method === 'POST') {
@@ -192,12 +213,20 @@ export default {async fetch(req, env) {
       const error = eventError(input);
       if (error) return fail(error, 400);
       if (input.date < berlinDate()) return fail('Das Veranstaltungsdatum muss heute oder in der Zukunft liegen.', 400);
-      const event = await db.prepare(`
+      const insert = db.prepare(`
         INSERT INTO future_events(id,title,date,time,place,activity,deadline,rest_from,active)
         VALUES((SELECT COALESCE(MAX(id),1)+1 FROM future_events),?,?,?,?,?,?,?,?)
         RETURNING id
-      `).bind(...eventValues(input)).first();
-      return reply({id: event.id}, 201);
+      `).bind(...eventValues(input));
+      if (!input.websiteUrl) {
+        const event = await insert.first();
+        return reply({id: event.id}, 201);
+      }
+      // The insert and the link write run in one transaction. The new event has the highest ID.
+      const [created] = await db.batch([insert, db.prepare(`
+        INSERT INTO event_websites(event_id,url) VALUES((SELECT MAX(id) FROM future_events),?)
+      `).bind(input.websiteUrl)]);
+      return reply({id: created.results[0].id}, 201);
     }
 
     const id = Number(url.searchParams.get('event') ?? legacyEventId);
@@ -206,9 +235,9 @@ export default {async fetch(req, env) {
     if (path === '/admin/data' && req.method === 'GET') {
       const event = await findEvent(db, id);
       if (!event && id !== legacyEventId) return fail('Veranstaltung nicht gefunden.', 404);
-      const [rsvps, invitees] = await Promise.all([responses(db, id), invitedNames(db, id)]);
+      const [rsvps, invitees, websiteUrl] = await Promise.all([responses(db, id), invitedNames(db, id), eventWebsite(db, id)]);
       const emptyEvent = {title:'',date:'',time:'',place:'',activity:'',deadline:'',restFrom:'',active:false};
-      return reply({event: publicEvent(event) || emptyEvent, rsvps: rsvps.results, invitees: invitees.results.map(x => x.name), canDeleteInvitees: true});
+      return reply({event: {...(publicEvent(event) || emptyEvent), websiteUrl}, rsvps: rsvps.results, invitees: invitees.results.map(x => x.name), canDeleteInvitees: true});
     }
 
     if (path === '/admin/event' && req.method === 'PUT') {
@@ -216,7 +245,7 @@ export default {async fetch(req, env) {
       const error = eventError(input);
       if (error) return fail(error, 400);
       const values = eventValues(input);
-      const result = await (id === legacyEventId
+      const update = id === legacyEventId
         ? db.prepare(`
             INSERT INTO events(id,title,date,time,place,activity,deadline,rest_from,active) VALUES(1,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET title=excluded.title,date=excluded.date,time=excluded.time,place=excluded.place,
@@ -224,7 +253,18 @@ export default {async fetch(req, env) {
           `).bind(...values)
         : db.prepare(`
             UPDATE future_events SET title=?,date=?,time=?,place=?,activity=?,deadline=?,rest_from=?,active=? WHERE id=?
-          `).bind(...values, id)).run();
+          `).bind(...values, id);
+      if (input.websiteUrl === undefined) {
+        const result = await update.run();
+        return result.meta.changes ? reply({ok: true}) : fail('Veranstaltung nicht gefunden.', 404);
+      }
+      const eventTable = id === legacyEventId ? 'events' : 'future_events';
+      const saveWebsite = db.prepare(`
+        INSERT INTO event_websites(event_id,url)
+        SELECT id,? FROM ${eventTable} WHERE id=?
+        ON CONFLICT(event_id) DO UPDATE SET url=excluded.url
+      `).bind(input.websiteUrl, id);
+      const [result] = await db.batch([update, saveWebsite]);
       return result.meta.changes ? reply({ok: true}) : fail('Veranstaltung nicht gefunden.', 404);
     }
 
