@@ -145,18 +145,20 @@ export default {async fetch(req, env) {
       if (typeof input.invite !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(input.invite)) {
         return fail('Einladungslink ungültig.', 401);
       }
-      const inviteHash = await hmac(env.TOKEN_SECRET, input.invite);
+      const legacyHash = await hmac(env.TOKEN_SECRET, input.invite);
       const person = await db.prepare(`
-        SELECT 1 AS event_id, name FROM invitees WHERE invite_token_hash=?
+        SELECT 1 AS event_id, name, invite_token_hash FROM invitees
+        WHERE invite_token_hash IN (?,?)
         UNION ALL
-        SELECT event_id, name FROM future_invitees WHERE invite_token_hash=?
+        SELECT event_id, name, invite_token_hash FROM future_invitees
+        WHERE invite_token_hash IN (?,?)
         LIMIT 1
-      `).bind(inviteHash, inviteHash).first();
+      `).bind(input.invite, legacyHash, input.invite, legacyHash).first();
       if (!person) return fail('Einladungslink ungültig.', 401);
       if (eventState(await findEvent(db, person.event_id)) === 'rest') {
         return fail('Diese Veranstaltung ist derzeit nicht verfügbar.', 403);
       }
-      return reply({token: await token(env, 'guest', {name: person.name, eventId: person.event_id, inviteHash})});
+      return reply({token: await token(env, 'guest', {name: person.name, eventId: person.event_id, inviteHash: person.invite_token_hash})});
     }
 
     if ((path === '/guest/event' && req.method === 'GET') || (path === '/rsvp' && req.method === 'POST')) {
@@ -273,12 +275,15 @@ export default {async fetch(req, env) {
     if (path === '/admin/link' && req.method === 'POST') {
       const input = await body(req);
       if (!validName(input.name)) return fail('Name prüfen.', 400);
-      const invite = base64url(crypto.getRandomValues(new Uint8Array(32)));
-      const hashed = await hmac(env.TOKEN_SECRET, invite);
-      const result = await (id === legacyEventId
-        ? db.prepare('UPDATE invitees SET invite_token_hash=? WHERE name=?').bind(hashed, input.name)
-        : db.prepare('UPDATE future_invitees SET invite_token_hash=? WHERE event_id=? AND name=?').bind(hashed, id, input.name)).run();
-      return result.meta.changes ? reply({invite}) : fail('Name nicht gefunden.', 404);
+      const candidate = base64url(crypto.getRandomValues(new Uint8Array(32)));
+      const hashed = await hmac(env.TOKEN_SECRET, candidate);
+      await (id === legacyEventId
+        ? db.prepare('UPDATE invitees SET invite_token_hash=COALESCE(invite_token_hash,?) WHERE name=?').bind(hashed, input.name)
+        : db.prepare('UPDATE future_invitees SET invite_token_hash=COALESCE(invite_token_hash,?) WHERE event_id=? AND name=?').bind(hashed, id, input.name)).run();
+      const person = await (id === legacyEventId
+        ? db.prepare('SELECT invite_token_hash FROM invitees WHERE name=?').bind(input.name)
+        : db.prepare('SELECT invite_token_hash FROM future_invitees WHERE event_id=? AND name=?').bind(id, input.name)).first();
+      return person ? reply({invite: person.invite_token_hash}) : fail('Name nicht gefunden.', 404);
     }
 
     if (path === '/admin/invitees' && req.method === 'POST') {
