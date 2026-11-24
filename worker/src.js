@@ -136,7 +136,7 @@ export default {async fetch(req, env) {
         SELECT deadline FROM future_events WHERE active=1 AND rest_from>?
         ORDER BY deadline DESC LIMIT 1
       `).bind(today, today).first();
-      return reply({status: available ? (available.deadline >= today ? 'open' : 'closed') : 'rest'});
+      return reply({status: available ? (available.deadline >= today ? 'open' : 'closed') : 'rest', links: 'stable-v1'});
     }
 
     if (path === '/guest/login' && req.method === 'POST') {
