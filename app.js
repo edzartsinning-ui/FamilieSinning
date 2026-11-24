@@ -115,6 +115,7 @@
     feedback.textContent = '';
     if (personalLink) {
       history.replaceState(null, '', location.pathname + location.search);
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
       guestToken = '';
       sessionStorage.removeItem('familie_guest');
     }
@@ -130,6 +131,7 @@
       const data = await request('/guest/event', 'GET', null, token);
       if (attempt !== guestRequest) return;
       showGuestDetails(data);
+      if (personalLink) $('guestHeading').focus({ preventScroll: true });
       guestToken = token;
       sessionStorage.setItem('familie_guest', token);
     } catch (err) {
