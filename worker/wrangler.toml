@@ -1,0 +1,11 @@
+name = "familiesinning-rsvp"
+main = "src.js"
+compatibility_date = "2026-11-24"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "familiesinning"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[vars]
+ALLOWED_ORIGIN = "https://edzartsinning-ui.github.io"
