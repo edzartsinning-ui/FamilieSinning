@@ -63,6 +63,7 @@
     $('guestHeading').hidden = true;
     $('guestName').textContent = '';
     $('inviteeName').textContent = '';
+    $('signupHeading').textContent = 'Bist du dabei?';
     $('infos').hidden = true;
     guestWebsite.hidden = true;
     guestWebsite.removeAttribute('href');
@@ -103,6 +104,7 @@
     signupDeadline.textContent = 'Bitte antworte bis einschließlich ' + deadlineFormat.format(new Date(event.deadline + 'T12:00:00Z')) + '.';
     $('guestName').textContent = name;
     $('inviteeName').textContent = name;
+    $('signupHeading').textContent = 'Bist du dabei, ' + name + '?';
     $('defaultHeading').hidden = true;
     $('guestHeading').hidden = false;
     $('infos').hidden = false;
