@@ -4,7 +4,8 @@
   const status = $('status'), feedback = $('feedback'), adminStatus = $('adminStatus');
   const adminLogin = $('adminLogin'), adminPanel = $('adminPanel');
   const loginStatus = $('adminLoginStatus'), inviteeAddStatus = $('inviteeAddStatus');
-  const eventSelect = $('eventSelect'), eventForm = $('eventForm');
+  const eventSelect = $('eventSelect'), archiveSelect = $('archiveSelect');
+  const eventArchive = $('eventArchive'), eventForm = $('eventForm');
   const eventContents = $('eventContents'), eventStatus = $('eventStatus');
   const eventFields = ['title', 'date', 'time', 'place', 'activity', 'deadline', 'restFrom'];
   const adminDetails = $('verwaltung').querySelector('details');
@@ -214,37 +215,39 @@
     return request(path + '?event=' + encodeURIComponent(id), method, data, adminToken);
   }
 
+  function fillEventSelect(select, events, emptyText) {
+    const placeholder = new Option(events.length ? 'Veranstaltung auswählen' : emptyText, '');
+    placeholder.disabled = true;
+    const options = events.map(event => {
+      const date = eventDate.format(new Date(event.date + 'T12:00:00Z'));
+      const label = date + ' · ' + event.title + (event.active ? '' : ' (inaktiv)');
+      return new Option(label, String(event.id));
+    });
+    select.replaceChildren(placeholder, ...options);
+    select.disabled = !events.length;
+    select.value = '';
+  }
+
   async function loadEventList(preferredId) {
     const {events} = await request('/admin/events', 'GET', null, adminToken);
     const today = new Intl.DateTimeFormat('sv-SE', {
       year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Europe/Berlin'
     }).format(new Date());
-    const upcoming = document.createElement('optgroup');
-    upcoming.label = 'Bevorstehende Veranstaltungen';
-    const past = document.createElement('optgroup');
-    past.label = 'Vergangene Veranstaltungen';
-    for (const event of events) {
-      const date = eventDate.format(new Date(event.date + 'T12:00:00Z'));
-      const label = date + ' · ' + event.title + (event.active ? '' : ' (inaktiv)');
-      (event.date >= today ? upcoming : past).append(new Option(label, String(event.id)));
-    }
-    const placeholder = new Option('Veranstaltung auswählen', '');
-    placeholder.disabled = true;
-    eventSelect.replaceChildren(placeholder);
-    if (upcoming.children.length) eventSelect.append(upcoming);
-    if (past.children.length) eventSelect.append(past);
-    eventSelect.disabled = !events.length;
+    const upcoming = events.filter(event => event.date >= today);
+    const archived = events.filter(event => event.date < today).reverse();
+    fillEventSelect(eventSelect, upcoming, 'Keine bevorstehenden Veranstaltungen');
+    fillEventSelect(archiveSelect, archived, 'Keine vergangenen Veranstaltungen');
+    $('eventArchiveLabel').textContent = `Archiv (${archived.length})`;
     const preferred = events.find(event => event.id === preferredId);
-    const selected = preferred || events.find(event => event.date >= today) || events.at(-1);
-    eventSelect.value = selected ? String(selected.id) : '';
-    return selected?.id ?? null;
+    return preferred?.id ?? upcoming[0]?.id ?? null;
   }
 
   async function loadAdmin() {
     const id = await loadEventList(eventId);
     adminPanel.hidden = false;
     adminLogin.hidden = true;
-    await selectEvent(id);
+    if (id !== null) await selectEvent(id);
+    else eventArchive.open = false;
   }
 
   function fillEventForm(event = {}) {
@@ -255,7 +258,11 @@
   async function selectEvent(id) {
     const selection = ++eventSelection;
     eventId = id;
-    eventSelect.value = id === null ? '' : String(id);
+    const value = id === null ? '' : String(id);
+    const inArchive = id !== null && Array.from(archiveSelect.options).some(option => option.value === value);
+    eventSelect.value = inArchive ? '' : value;
+    archiveSelect.value = inArchive ? value : '';
+    eventArchive.open = inArchive;
     eventContents.hidden = true;
     adminStatus.textContent = '';
     adminStatus.style.color = '';
@@ -288,6 +295,7 @@
   }
 
   eventSelect.addEventListener('change', () => selectEvent(Number(eventSelect.value)));
+  archiveSelect.addEventListener('change', () => selectEvent(Number(archiveSelect.value)));
   $('newEvent').addEventListener('click', () => selectEvent(null));
 
   function renderPeople(data, id) {
@@ -436,6 +444,7 @@
     event.active = eventForm.elements.active.checked;
     $('eventSave').disabled = true;
     eventSelect.inert = true;
+    archiveSelect.inert = true;
     $('newEvent').disabled = true;
     eventStatus.style.color = '';
     eventStatus.textContent = 'Veranstaltung wird gespeichert …';
@@ -460,6 +469,7 @@
     } finally {
       $('eventSave').disabled = false;
       eventSelect.inert = false;
+      archiveSelect.inert = false;
       $('newEvent').disabled = false;
     }
   });
