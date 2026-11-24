@@ -5,7 +5,7 @@ compatibility_date = "2026-11-24"
 [[d1_databases]]
 binding = "DB"
 database_name = "familiesinning"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "2c8fb8eb-0b41-4852-8508-53ef4db106b3"
 
 [vars]
 ALLOWED_ORIGIN = "https://edzartsinning-ui.github.io"
