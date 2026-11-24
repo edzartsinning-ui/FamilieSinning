@@ -4,6 +4,9 @@
   const status = $('status'), feedback = $('feedback'), adminStatus = $('adminStatus');
   const adminLogin = $('adminLogin'), adminPanel = $('adminPanel');
   const loginStatus = $('adminLoginStatus'), inviteeAddStatus = $('inviteeAddStatus');
+  const eventSelect = $('eventSelect'), eventForm = $('eventForm');
+  const eventContents = $('eventContents'), eventStatus = $('eventStatus');
+  const eventFields = ['title', 'date', 'time', 'place', 'activity', 'deadline', 'restFrom'];
   const adminDetails = $('verwaltung').querySelector('details');
 
   function openAdminFromHash() {
@@ -21,6 +24,8 @@
   let guestVerified = false;
   let guestRequest = 0;
   let adminToken = sessionStorage.getItem('familie_admin') || '';
+  let eventId = null;
+  let eventSelection = 0;
   async function request(path, method = 'GET', body, token) {
     if (!api) throw new Error('Die Anmeldung ist noch nicht freigeschaltet.');
     let r;
@@ -66,12 +71,14 @@
   async function refresh() {
     const attempt = guestRequest;
     try {
-      const data = await request('/status');
+      const data = guestVerified
+        ? await request('/guest/event', 'GET', null, guestToken)
+        : await request('/status');
       if (attempt === guestRequest) renderStatus(data);
     } catch (err) {
       if (attempt !== guestRequest) return;
+      if (guestVerified) hideGuestDetails();
       showError(status, err);
-      rsvpForm.hidden = true;
     }
   }
 
@@ -163,6 +170,9 @@
   });
 
   function endAdminSession() {
+    eventSelection++;
+    eventId = null;
+    eventContents.hidden = true;
     adminToken = '';
     sessionStorage.removeItem('familie_admin');
     adminPanel.hidden = true;
@@ -194,13 +204,149 @@
   });
   $('logout').addEventListener('click', endAdminSession);
 
-  async function loadAdmin(){ const d=await request('/admin/data','GET',null,adminToken); adminPanel.hidden=false;adminLogin.hidden=true;adminStatus.style.color='';adminStatus.textContent='';$('responseCount').textContent=`Antworten (${d.rsvps.length})`;const rows=$('rsvpRows');rows.replaceChildren();for(const item of d.rsvps){const tr=document.createElement('tr');for(const value of [item.name,item.answer==='yes'?'Zusage':'Absage',item.message||'—',item.updated_at]){const td=document.createElement('td');td.textContent=value;tr.append(td);}rows.append(tr);} $('inviteeList').replaceChildren(...d.invitees.map(n=>{const li=document.createElement('li');const span=document.createElement('span');span.textContent=n+' ';const b=document.createElement('button');b.type='button';b.className='button ghost';b.textContent='Persönlichen Link erstellen';b.addEventListener('click',async()=>{try{const result=await request('/admin/link','POST',{name:n},adminToken);const url=new URL(location.href);url.search='';url.hash='invite='+encodeURIComponent(result.invite);const field=$('generatedLink');field.replaceChildren(document.createTextNode(n+': '));const a=document.createElement('a');a.href=url.href;a.textContent=url.href;field.append(a);await navigator.clipboard.writeText(url.href).catch(()=>{});}catch(err){showError(adminStatus,err);}});li.append(span,b);return li;}));$('oldName').replaceChildren(new Option('Bitte auswählen',''),...d.invitees.map(n=>new Option(n,n)));const f=$('eventForm');for(const k of ['title','date','time','place','activity','deadline','restFrom']) f.elements[k].value=d.event[k]||'';f.elements.active.checked=!!d.event.active; }
+  const eventDate = new Intl.DateTimeFormat('de-DE', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin'
+  });
+
+  function eventRequest(path, id, method, data) {
+    return request(path + '?event=' + encodeURIComponent(id), method, data, adminToken);
+  }
+
+  async function loadEventList(preferredId) {
+    const {events} = await request('/admin/events', 'GET', null, adminToken);
+    const today = new Intl.DateTimeFormat('sv-SE', {
+      year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Europe/Berlin'
+    }).format(new Date());
+    const upcoming = document.createElement('optgroup');
+    upcoming.label = 'Bevorstehende Veranstaltungen';
+    const past = document.createElement('optgroup');
+    past.label = 'Vergangene Veranstaltungen';
+    for (const event of events) {
+      const date = eventDate.format(new Date(event.date + 'T12:00:00Z'));
+      const label = date + ' · ' + event.title + (event.active ? '' : ' (inaktiv)');
+      (event.date >= today ? upcoming : past).append(new Option(label, String(event.id)));
+    }
+    const placeholder = new Option('Veranstaltung auswählen', '');
+    placeholder.disabled = true;
+    eventSelect.replaceChildren(placeholder);
+    if (upcoming.children.length) eventSelect.append(upcoming);
+    if (past.children.length) eventSelect.append(past);
+    eventSelect.disabled = !events.length;
+    const preferred = events.find(event => event.id === preferredId);
+    const selected = preferred || events.find(event => event.date >= today) || events.at(-1);
+    eventSelect.value = selected ? String(selected.id) : '';
+    return selected?.id ?? null;
+  }
+
+  async function loadAdmin() {
+    const id = await loadEventList(eventId);
+    adminPanel.hidden = false;
+    adminLogin.hidden = true;
+    await selectEvent(id);
+  }
+
+  function fillEventForm(event = {}) {
+    for (const key of eventFields) eventForm.elements[key].value = event[key] || '';
+    eventForm.elements.active.checked = !!event.active;
+  }
+
+  async function selectEvent(id) {
+    const selection = ++eventSelection;
+    eventId = id;
+    eventSelect.value = id === null ? '' : String(id);
+    eventContents.hidden = true;
+    adminStatus.textContent = '';
+    adminStatus.style.color = '';
+    eventStatus.textContent = '';
+    $('generatedLink').replaceChildren();
+    $('inviteeAdd').reset();
+    $('inviteeRename').reset();
+    inviteeAddStatus.textContent = '';
+    $('eventPeople').hidden = id === null;
+    $('eventFormTitle').textContent = id === null ? 'Neue Veranstaltung' : 'Veranstaltung bearbeiten';
+    $('eventSave').textContent = id === null ? 'Veranstaltung anlegen' : 'Speichern';
+    if (id === null) {
+      fillEventForm();
+      eventContents.hidden = false;
+      eventForm.elements.title.focus();
+      return;
+    }
+
+    adminStatus.textContent = 'Veranstaltung wird geladen …';
+    try {
+      const data = await eventRequest('/admin/data', id);
+      if (selection !== eventSelection) return;
+      renderPeople(data, id);
+      fillEventForm(data.event);
+      adminStatus.textContent = '';
+      eventContents.hidden = false;
+    } catch (err) {
+      if (selection === eventSelection) showError(adminStatus, err);
+    }
+  }
+
+  eventSelect.addEventListener('change', () => selectEvent(Number(eventSelect.value)));
+  $('newEvent').addEventListener('click', () => selectEvent(null));
+
+  function renderPeople(data, id) {
+    $('responseCount').textContent = `Antworten (${data.rsvps.length})`;
+    const rows = $('rsvpRows');
+    rows.replaceChildren();
+    for (const item of data.rsvps) {
+      const row = document.createElement('tr');
+      for (const value of [item.name, item.answer === 'yes' ? 'Zusage' : 'Absage', item.message || '—', item.updated_at]) {
+        const cell = document.createElement('td');
+        cell.textContent = value;
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+
+    $('inviteeList').replaceChildren(...data.invitees.map(name => {
+      const item = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = name + ' ';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'button ghost';
+      button.textContent = 'Persönlichen Link erstellen';
+      button.addEventListener('click', async () => {
+        const selection = eventSelection;
+        button.disabled = true;
+        try {
+          const result = await eventRequest('/admin/link', id, 'POST', {name});
+          if (selection !== eventSelection) return;
+          const href = invitationUrl(result.invite);
+          const field = $('generatedLink');
+          const link = document.createElement('a');
+          link.href = href;
+          link.textContent = href;
+          field.replaceChildren(document.createTextNode(name + ': '), link);
+          await navigator.clipboard?.writeText(href).catch(() => {});
+        } catch (err) {
+          if (selection === eventSelection) showError(adminStatus, err);
+        } finally {
+          button.disabled = false;
+        }
+      });
+      item.append(label, button);
+      return item;
+    }));
+    $('oldName').replaceChildren(new Option('Bitte auswählen', ''), ...data.invitees.map(name => new Option(name, name)));
+  }
+
+  async function refreshPeople(id, selection) {
+    const data = await eventRequest('/admin/data', id);
+    if (selection === eventSelection) renderPeople(data, id);
+  }
+
   $('inviteeAdd').addEventListener('submit', async e => {
     e.preventDefault();
     const form = e.currentTarget;
     const button = e.submitter || form.querySelector('button');
     const field = form.elements.inviteeName;
     const name = field.value.trim();
+    const id = eventId, selection = eventSelection;
     if (!name) {
       showError(inviteeAddStatus, new Error('Bitte gib einen Namen ein.'));
       field.focus();
@@ -211,27 +357,131 @@
     inviteeAddStatus.style.color = '';
     inviteeAddStatus.textContent = 'Name wird gespeichert …';
     try {
-      await request('/admin/invitees', 'POST', {name}, adminToken);
+      await eventRequest('/admin/invitees', id, 'POST', {name});
+      if (selection !== eventSelection) return;
       if (field.value.trim() === name) field.value = '';
       inviteeAddStatus.style.color = '#00e9ee';
       inviteeAddStatus.textContent = name + ' wurde hinzugefügt.';
       try {
-        await loadAdmin();
+        await refreshPeople(id, selection);
       } catch {
-        if (adminToken) {
+        if (selection === eventSelection) {
           showError(inviteeAddStatus, new Error(name + ' wurde gespeichert. Die Liste konnte gerade nicht aktualisiert werden.'));
         }
       }
     } catch (err) {
-      if (adminToken) showError(inviteeAddStatus, err);
+      if (selection === eventSelection) showError(inviteeAddStatus, err);
     } finally {
       button.disabled = false;
     }
   });
-  $('inviteeRename').addEventListener('submit',async e=>{e.preventDefault();try{await request('/admin/invitees','PUT',{oldName:$('oldName').value,newName:$('newName').value},adminToken);e.target.reset();await loadAdmin();}catch(err){showError(adminStatus,err);}});
-  $('eventForm').addEventListener('submit',async e=>{e.preventDefault();const f=e.target;const event={};for(const k of ['title','date','time','place','activity','deadline','restFrom'])event[k]=f.elements[k].value.trim();event.active=f.elements.active.checked;try{await request('/admin/event','PUT',event,adminToken);adminStatus.style.color='#00e9ee';adminStatus.textContent='Veranstaltung gespeichert.';await refresh();}catch(err){showError(adminStatus,err);}});
-  $('export').addEventListener('click',async()=>{try{const d=await request('/admin/data','GET',null,adminToken);const lines=[['Name','Antwort','Nachricht','Zeit'],...d.rsvps.map(x=>[x.name,x.answer==='yes'?'Zusage':'Absage',x.message||'',x.updated_at])];const csv='\uFEFF'+lines.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));link.download='teilnehmerliste.csv';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);}catch(err){showError(adminStatus,err);}});
-  $('exportLinks').addEventListener('click',async()=>{const button=$('exportLinks');button.disabled=true;try{const d=await request('/admin/data','GET',null,adminToken);if(!d.invitees.length)throw new Error('Bitte zuerst eingeladene Personen hinzufügen.');const lines=[['Name','Persönlicher Link']];for(const name of d.invitees){const result=await request('/admin/link','POST',{name},adminToken);const url=new URL(location.href);url.search='';url.hash='invite='+encodeURIComponent(result.invite);lines.push([name,url.href]);}const csv='\uFEFF'+lines.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');const href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=href;link.download='persoenliche-einladungslinks.csv';link.click();setTimeout(()=>URL.revokeObjectURL(href),1000);adminStatus.textContent=lines.length-1+' persönliche Links heruntergeladen. Die Datei bitte privat aufbewahren.';}catch(err){showError(adminStatus,err);}finally{button.disabled=false;}});
+
+  $('inviteeRename').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const selection = eventSelection, id = eventId;
+    const button = e.submitter || form.querySelector('button');
+    button.disabled = true;
+    try {
+      await eventRequest('/admin/invitees', id, 'PUT', {oldName: $('oldName').value, newName: $('newName').value});
+      if (selection !== eventSelection) return;
+      form.reset();
+      await refreshPeople(id, selection);
+    } catch (err) {
+      if (selection === eventSelection) showError(adminStatus, err);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  eventForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const id = eventId, selection = eventSelection;
+    const event = Object.fromEntries(eventFields.map(key => [key, eventForm.elements[key].value.trim()]));
+    event.active = eventForm.elements.active.checked;
+    $('eventSave').disabled = true;
+    eventSelect.inert = true;
+    $('newEvent').disabled = true;
+    eventStatus.style.color = '';
+    eventStatus.textContent = 'Veranstaltung wird gespeichert …';
+
+    try {
+      const result = id === null
+        ? await request('/admin/events', 'POST', event, adminToken)
+        : await eventRequest('/admin/event', id, 'PUT', event);
+      if (selection !== eventSelection) return;
+      // Keep the saved ID even if reloading the list fails, so a retry updates this event.
+      eventId = id ?? result.id;
+      const savedId = eventId;
+      await loadEventList(savedId);
+      if (selection !== eventSelection) return;
+      await selectEvent(savedId);
+      if (eventId !== savedId) return;
+      eventStatus.style.color = '#00e9ee';
+      eventStatus.textContent = id === null ? 'Veranstaltung angelegt.' : 'Veranstaltung gespeichert.';
+      await refresh();
+    } catch (err) {
+      if (selection === eventSelection) showError(eventStatus, err);
+    } finally {
+      $('eventSave').disabled = false;
+      eventSelect.inert = false;
+      $('newEvent').disabled = false;
+    }
+  });
+
+  function downloadCsv(filename, lines) {
+    const csv = '\uFEFF' + lines.map(row => row.map(value => '"' + String(value).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+    const href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+  }
+
+  function invitationUrl(invite) {
+    const url = new URL(location.href);
+    url.search = '';
+    url.hash = 'invite=' + encodeURIComponent(invite);
+    return url.href;
+  }
+
+  $('export').addEventListener('click', async () => {
+    const id = eventId, selection = eventSelection;
+    try {
+      const data = await eventRequest('/admin/data', id);
+      if (selection !== eventSelection) return;
+      const lines = [['Name', 'Antwort', 'Nachricht', 'Zeit'], ...data.rsvps.map(item => [
+        item.name, item.answer === 'yes' ? 'Zusage' : 'Absage', item.message || '', item.updated_at
+      ])];
+      downloadCsv('teilnehmerliste.csv', lines);
+    } catch (err) {
+      if (selection === eventSelection) showError(adminStatus, err);
+    }
+  });
+
+  $('exportLinks').addEventListener('click', async () => {
+    const button = $('exportLinks');
+    const id = eventId, selection = eventSelection;
+    button.disabled = true;
+    try {
+      const data = await eventRequest('/admin/data', id);
+      if (!data.invitees.length) throw new Error('Bitte zuerst eingeladene Personen hinzufügen.');
+      const lines = [['Name', 'Persönlicher Link']];
+      for (const name of data.invitees) {
+        const result = await eventRequest('/admin/link', id, 'POST', {name});
+        lines.push([name, invitationUrl(result.invite)]);
+      }
+      downloadCsv('persoenliche-einladungslinks.csv', lines);
+      if (selection === eventSelection) {
+        adminStatus.textContent = lines.length - 1 + ' persönliche Links heruntergeladen. Die Datei bitte privat aufbewahren.';
+      }
+    } catch (err) {
+      if (selection === eventSelection) showError(adminStatus, err);
+    } finally {
+      button.disabled = false;
+    }
+  });
   openInvitation();
   if(adminToken)loadAdmin().catch(err => {
     if (adminToken) showError(loginStatus, err);
